@@ -1,5 +1,7 @@
 import {
+  IonBackButton,
   IonButton,
+  IonButtons,
   IonContent,
   IonHeader,
   IonInput,
@@ -17,10 +19,30 @@ import {
 import { Camera, CameraResultType, CameraSource, type Photo } from '@capacitor/camera';
 import { Filesystem } from '@capacitor/filesystem';
 import { isPlatform } from '@ionic/react';
-import React, { useMemo, useState } from 'react';
-import { useHistory } from 'react-router-dom';
-import { wpPostJson, wpUploadMedia } from '../api/wordpress';
-import './Tab3.css';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useHistory, useParams } from 'react-router-dom';
+import {
+  type WpDailyJournal,
+  type WpPostType,
+  type WpQuickNote,
+  wpGet,
+  wpPostJson,
+  wpUploadMedia,
+  decodeHtml,
+} from '../api/wordpress';
+
+type RouteParams = {
+  type: WpPostType;
+  id: string;
+};
+
+const allowedMoods = ['Happy', 'Calm', 'Neutral', 'Tired', 'Stressed', 'Anxious', 'Excited'] as const;
+type AllowedMood = (typeof allowedMoods)[number];
+
+function sanitizeMood(value: unknown): AllowedMood {
+  if (typeof value !== 'string') return 'Neutral';
+  return (allowedMoods as readonly string[]).includes(value) ? (value as AllowedMood) : 'Neutral';
+}
 
 function formatDateForAcf(date: Date): string {
   const y = String(date.getFullYear());
@@ -36,6 +58,7 @@ function base64ToBlob(base64: string, contentType: string): Blob {
   for (let i = 0; i < byteCharacters.length; i++) {
     bytes[i] = byteCharacters.charCodeAt(i);
   }
+
   return new Blob([bytes] as BlobPart[], { type: contentType });
 }
 
@@ -49,30 +72,60 @@ async function photoToBlob(photo: Photo): Promise<Blob> {
   return base64ToBlob(readFile.data as string, 'image/jpeg');
 }
 
-const Tab3: React.FC = () => {
+const NoteDetail: React.FC = () => {
+  const { type, id } = useParams<RouteParams>();
   const history = useHistory();
   const [present] = useIonToast();
 
-  const [loading, setLoading] = useState(false);
-  const [noteType, setNoteType] = useState<'quick-note' | 'daily-journal'>('daily-journal');
+  const [loading, setLoading] = useState(true);
 
   const [title, setTitle] = useState('');
+
   const [imageId, setImageId] = useState<number | null>(null);
 
-  // quick-note
   const [imageDescription, setImageDescription] = useState('');
   const [imageLocation, setImageLocation] = useState('');
   const [notesBody, setNotesBody] = useState('');
 
-  // daily-journal
   const [journalDate, setJournalDate] = useState(formatDateForAcf(new Date()));
-  const [mood, setMood] = useState('Neutral');
+  const [mood, setMood] = useState<AllowedMood>('Neutral');
   const [journalEntry, setJournalEntry] = useState('');
   const [journalPrompt, setJournalPrompt] = useState('');
 
-  const pageTitle = useMemo(() => {
-    return noteType === 'daily-journal' ? 'New Daily Journal' : 'New Quick Note';
-  }, [noteType]);
+  const titleLabel = useMemo(() => {
+    if (type === 'daily-journal') return 'Edit Daily Journal';
+    return 'Edit Quick Note';
+  }, [type]);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        if (type === 'quick-note') {
+          const post = await wpGet<WpQuickNote>(`/wp/v2/quick-note/${id}`);
+          setTitle(decodeHtml(post.title.rendered || ''));
+          setImageId(post.acf.note_image ?? null);
+          setImageDescription(post.acf.image_description || '');
+          setImageLocation(post.acf.image_location || '');
+          setNotesBody(post.acf.notes_body || '');
+        } else {
+          const post = await wpGet<WpDailyJournal>(`/wp/v2/daily-journal/${id}`);
+          setTitle(decodeHtml(post.title.rendered || ''));
+          setImageId(post.acf.journal_image ?? null);
+          setJournalDate(post.acf.journal_date || formatDateForAcf(new Date()));
+          setMood(sanitizeMood(post.acf.mood));
+          setJournalEntry(post.acf.journal_entry || '');
+          setJournalPrompt(post.acf.journal_prompt || '');
+        }
+      } catch (e) {
+        present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [id, present, type]);
 
   const pickAndUploadImage = async () => {
     try {
@@ -91,12 +144,11 @@ const Tab3: React.FC = () => {
     }
   };
 
-  const submit = async () => {
+  const save = async () => {
     setLoading(true);
     try {
-      if (noteType === 'quick-note') {
-        await wpPostJson('/wp/v2/quick-note', {
-          status: 'publish',
+      if (type === 'quick-note') {
+        await wpPostJson(`/wp/v2/quick-note/${id}`, {
           title,
           acf: {
             note_image: imageId,
@@ -106,20 +158,18 @@ const Tab3: React.FC = () => {
           },
         });
       } else {
-        await wpPostJson('/wp/v2/daily-journal', {
-          status: 'publish',
+        await wpPostJson(`/wp/v2/daily-journal/${id}`, {
           title,
           acf: {
             journal_date: journalDate,
-            mood,
+            mood: sanitizeMood(mood),
             journal_image: imageId,
             journal_entry: journalEntry,
             journal_prompt: journalPrompt,
           },
         });
       }
-
-      present({ message: 'Created', duration: 1200, color: 'success' });
+      present({ message: 'Saved', duration: 1200, color: 'success' });
       history.replace('/tab1');
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
@@ -132,19 +182,17 @@ const Tab3: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>{pageTitle}</IonTitle>
+          <IonButtons slot="start">
+            <IonBackButton defaultHref="/tab1" />
+          </IonButtons>
+          <IonTitle>{titleLabel}</IonTitle>
+          <IonButtons slot="end">
+            <IonButton onClick={save}>Save</IonButton>
+          </IonButtons>
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen>
-        <IonLoading isOpen={loading} message="Saving..." />
-
-        <IonItem>
-          <IonLabel position="stacked">Note Type</IonLabel>
-          <IonSelect value={noteType} onIonChange={(e) => setNoteType(e.detail.value)}>
-            <IonSelectOption value="daily-journal">Daily Journal</IonSelectOption>
-            <IonSelectOption value="quick-note">Quick Note</IonSelectOption>
-          </IonSelect>
-        </IonItem>
+        <IonLoading isOpen={loading} message="Loading..." />
 
         <IonItem>
           <IonLabel position="stacked">Title</IonLabel>
@@ -158,7 +206,7 @@ const Tab3: React.FC = () => {
           </IonButton>
         </IonItem>
 
-        {noteType === 'quick-note' ? (
+        {type === 'quick-note' ? (
           <>
             <IonItem>
               <IonLabel position="stacked">Image Description</IonLabel>
@@ -184,12 +232,14 @@ const Tab3: React.FC = () => {
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Mood</IonLabel>
-              <IonSelect value={mood} onIonChange={(e) => setMood(e.detail.value)}>
-                <IonSelectOption value="Great">Great</IonSelectOption>
-                <IonSelectOption value="Good">Good</IonSelectOption>
+              <IonSelect value={mood} onIonChange={(e) => setMood(sanitizeMood(e.detail.value))}>
+                <IonSelectOption value="Happy">Happy</IonSelectOption>
+                <IonSelectOption value="Calm">Calm</IonSelectOption>
                 <IonSelectOption value="Neutral">Neutral</IonSelectOption>
-                <IonSelectOption value="Bad">Bad</IonSelectOption>
-                <IonSelectOption value="Awful">Awful</IonSelectOption>
+                <IonSelectOption value="Tired">Tired</IonSelectOption>
+                <IonSelectOption value="Stressed">Stressed</IonSelectOption>
+                <IonSelectOption value="Anxious">Anxious</IonSelectOption>
+                <IonSelectOption value="Excited">Excited</IonSelectOption>
               </IonSelect>
             </IonItem>
             <IonItem>
@@ -204,8 +254,8 @@ const Tab3: React.FC = () => {
         )}
 
         <IonItem lines="none">
-          <IonButton expand="block" onClick={submit}>
-            Create
+          <IonButton expand="block" onClick={save}>
+            Save
           </IonButton>
         </IonItem>
       </IonContent>
@@ -213,4 +263,4 @@ const Tab3: React.FC = () => {
   );
 };
 
-export default Tab3;
+export default NoteDetail;
