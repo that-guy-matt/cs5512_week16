@@ -11,12 +11,17 @@ import { IonContent,
          IonRow,
          IonCol,
          IonImg, 
+         useIonViewWillEnter,
         } from '@ionic/react';
 import { usePhotoGallery } from '../hooks/usePhotoGallery';
 import './Tab2.css';
 
 const Tab2: React.FC = () => {
-  const { photos, addNewToGallery } = usePhotoGallery();
+  const { photos, addNewToGallery, reloadPhotos } = usePhotoGallery();
+
+  useIonViewWillEnter(() => {
+    reloadPhotos();
+  });
   return (
     <IonPage>
       <IonHeader>

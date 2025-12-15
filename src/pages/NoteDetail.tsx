@@ -1,14 +1,19 @@
 import {
+  IonActionSheet,
   IonBackButton,
   IonButton,
   IonButtons,
+  IonCol,
   IonContent,
   IonHeader,
+  IonImg,
   IonInput,
   IonItem,
   IonLabel,
   IonLoading,
+  IonModal,
   IonPage,
+  IonRow,
   IonSelect,
   IonSelectOption,
   IonTextarea,
@@ -30,6 +35,7 @@ import {
   wpUploadMedia,
   decodeHtml,
 } from '../api/wordpress';
+import { usePhotoGallery, type UserPhoto } from '../hooks/usePhotoGallery';
 
 type RouteParams = {
   type: WpPostType;
@@ -77,7 +83,12 @@ const NoteDetail: React.FC = () => {
   const history = useHistory();
   const [present] = useIonToast();
 
+  const { photos, savePhotoToGallery } = usePhotoGallery();
+
   const [loading, setLoading] = useState(true);
+
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [imageActionOpen, setImageActionOpen] = useState(false);
 
   const [title, setTitle] = useState('');
 
@@ -127,13 +138,16 @@ const NoteDetail: React.FC = () => {
     load();
   }, [id, present, type]);
 
-  const pickAndUploadImage = async () => {
+  const pickAndUploadImage = async (source: CameraSource) => {
     try {
       const photo = await Camera.getPhoto({
         resultType: CameraResultType.Uri,
-        source: CameraSource.Prompt,
+        source,
         quality: 85,
       });
+
+      await savePhotoToGallery(photo);
+
       const blob = await photoToBlob(photo);
       const filename = `${Date.now()}.jpg`;
       const media = await wpUploadMedia(blob, filename);
@@ -141,6 +155,28 @@ const NoteDetail: React.FC = () => {
       present({ message: 'Image uploaded', duration: 1200, color: 'success' });
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
+    }
+  };
+
+  const galleryPhotoToBlob = async (photo: UserPhoto): Promise<Blob> => {
+    if (!photo.webviewPath) throw new Error('Selected photo is missing a webview path');
+    const res = await fetch(photo.webviewPath);
+    return await res.blob();
+  };
+
+  const pickFromGalleryAndUpload = async (photo: UserPhoto) => {
+    setGalleryOpen(false);
+    setLoading(true);
+    try {
+      const blob = await galleryPhotoToBlob(photo);
+      const filename = `${Date.now()}.jpg`;
+      const media = await wpUploadMedia(blob, filename);
+      setImageId(media.id);
+      present({ message: 'Image uploaded', duration: 1200, color: 'success' });
+    } catch (e) {
+      present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -196,15 +232,58 @@ const NoteDetail: React.FC = () => {
 
         <IonItem>
           <IonLabel position="stacked">Title</IonLabel>
-          <IonInput value={title} onIonInput={(e) => setTitle(e.detail.value ?? '')} />
+          <IonInput value={title} placeholder="e.g. Morning reflections" onIonInput={(e) => setTitle(e.detail.value ?? '')} />
         </IonItem>
 
         <IonItem lines="none">
           <IonLabel>Image</IonLabel>
-          <IonButton onClick={pickAndUploadImage} slot="end">
-            {imageId ? 'Replace' : 'Add'}
+          <IonButton onClick={() => setImageActionOpen(true)} slot="end">
+            Add Image
           </IonButton>
         </IonItem>
+
+        <IonActionSheet
+          isOpen={imageActionOpen}
+          onDidDismiss={() => setImageActionOpen(false)}
+          buttons={[
+            {
+              text: 'Take Photo',
+              handler: () => pickAndUploadImage(CameraSource.Camera),
+            },
+            {
+              text: 'Upload from Photos',
+              handler: () => pickAndUploadImage(CameraSource.Photos),
+            },
+            {
+              text: 'Choose from Gallery',
+              handler: () => setGalleryOpen(true),
+            },
+            {
+              text: 'Cancel',
+              role: 'cancel',
+            },
+          ]}
+        />
+
+        <IonModal isOpen={galleryOpen} onDidDismiss={() => setGalleryOpen(false)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>Select from Gallery</IonTitle>
+              <IonButton slot="end" onClick={() => setGalleryOpen(false)}>
+                Close
+              </IonButton>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent>
+            <IonRow>
+              {photos.map((p) => (
+                <IonCol size="6" key={p.filepath}>
+                  <IonImg src={p.webviewPath} onClick={() => pickFromGalleryAndUpload(p)} />
+                </IonCol>
+              ))}
+            </IonRow>
+          </IonContent>
+        </IonModal>
 
         {type === 'quick-note' ? (
           <>
@@ -212,23 +291,36 @@ const NoteDetail: React.FC = () => {
               <IonLabel position="stacked">Image Description</IonLabel>
               <IonInput
                 value={imageDescription}
+                placeholder="e.g. Golden hour by the river"
                 onIonInput={(e) => setImageDescription(e.detail.value ?? '')}
               />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Where Taken</IonLabel>
-              <IonInput value={imageLocation} onIonInput={(e) => setImageLocation(e.detail.value ?? '')} />
+              <IonInput
+                value={imageLocation}
+                placeholder="e.g. Downtown OKC"
+                onIonInput={(e) => setImageLocation(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Notes</IonLabel>
-              <IonTextarea value={notesBody} onIonInput={(e) => setNotesBody(e.detail.value ?? '')} />
+              <IonTextarea
+                value={notesBody}
+                placeholder="Add a few details about the photo or your thoughts..."
+                onIonInput={(e) => setNotesBody(e.detail.value ?? '')}
+              />
             </IonItem>
           </>
         ) : (
           <>
             <IonItem>
               <IonLabel position="stacked">Journal Date (YYYYMMDD)</IonLabel>
-              <IonInput value={journalDate} onIonInput={(e) => setJournalDate(e.detail.value ?? '')} />
+              <IonInput
+                value={journalDate}
+                placeholder="YYYYMMDD"
+                onIonInput={(e) => setJournalDate(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Mood</IonLabel>
@@ -244,11 +336,19 @@ const NoteDetail: React.FC = () => {
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Journal Entry</IonLabel>
-              <IonTextarea value={journalEntry} onIonInput={(e) => setJournalEntry(e.detail.value ?? '')} />
+              <IonTextarea
+                value={journalEntry}
+                placeholder="Write about your day..."
+                onIonInput={(e) => setJournalEntry(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Prompt Used</IonLabel>
-              <IonTextarea value={journalPrompt} onIonInput={(e) => setJournalPrompt(e.detail.value ?? '')} />
+              <IonTextarea
+                value={journalPrompt}
+                placeholder="Optional prompt"
+                onIonInput={(e) => setJournalPrompt(e.detail.value ?? '')}
+              />
             </IonItem>
           </>
         )}

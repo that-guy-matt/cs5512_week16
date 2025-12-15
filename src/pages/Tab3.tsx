@@ -1,12 +1,17 @@
 import {
+  IonActionSheet,
   IonButton,
+  IonCol,
   IonContent,
   IonHeader,
+  IonImg,
   IonInput,
   IonItem,
   IonLabel,
   IonLoading,
+  IonModal,
   IonPage,
+  IonRow,
   IonSelect,
   IonSelectOption,
   IonTextarea,
@@ -20,7 +25,16 @@ import { isPlatform } from '@ionic/react';
 import React, { useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { wpPostJson, wpUploadMedia } from '../api/wordpress';
+import { usePhotoGallery, type UserPhoto } from '../hooks/usePhotoGallery';
 import './Tab3.css';
+
+const allowedMoods = ['Happy', 'Calm', 'Neutral', 'Tired', 'Stressed', 'Anxious', 'Excited'] as const;
+type AllowedMood = (typeof allowedMoods)[number];
+
+function sanitizeMood(value: unknown): AllowedMood {
+  if (typeof value !== 'string') return 'Neutral';
+  return (allowedMoods as readonly string[]).includes(value) ? (value as AllowedMood) : 'Neutral';
+}
 
 function formatDateForAcf(date: Date): string {
   const y = String(date.getFullYear());
@@ -53,8 +67,13 @@ const Tab3: React.FC = () => {
   const history = useHistory();
   const [present] = useIonToast();
 
+  const { photos, savePhotoToGallery } = usePhotoGallery();
+
   const [loading, setLoading] = useState(false);
   const [noteType, setNoteType] = useState<'quick-note' | 'daily-journal'>('daily-journal');
+
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [imageActionOpen, setImageActionOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [imageId, setImageId] = useState<number | null>(null);
@@ -66,7 +85,7 @@ const Tab3: React.FC = () => {
 
   // daily-journal
   const [journalDate, setJournalDate] = useState(formatDateForAcf(new Date()));
-  const [mood, setMood] = useState('Neutral');
+  const [mood, setMood] = useState<AllowedMood>('Neutral');
   const [journalEntry, setJournalEntry] = useState('');
   const [journalPrompt, setJournalPrompt] = useState('');
 
@@ -74,13 +93,16 @@ const Tab3: React.FC = () => {
     return noteType === 'daily-journal' ? 'New Daily Journal' : 'New Quick Note';
   }, [noteType]);
 
-  const pickAndUploadImage = async () => {
+  const pickAndUploadImage = async (source: CameraSource) => {
     try {
       const photo = await Camera.getPhoto({
         resultType: CameraResultType.Uri,
-        source: CameraSource.Prompt,
+        source,
         quality: 85,
       });
+
+      await savePhotoToGallery(photo);
+
       const blob = await photoToBlob(photo);
       const filename = `${Date.now()}.jpg`;
       const media = await wpUploadMedia(blob, filename);
@@ -88,6 +110,28 @@ const Tab3: React.FC = () => {
       present({ message: 'Image uploaded', duration: 1200, color: 'success' });
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
+    }
+  };
+
+  const galleryPhotoToBlob = async (photo: UserPhoto): Promise<Blob> => {
+    if (!photo.webviewPath) throw new Error('Selected photo is missing a webview path');
+    const res = await fetch(photo.webviewPath);
+    return await res.blob();
+  };
+
+  const pickFromGalleryAndUpload = async (photo: UserPhoto) => {
+    setGalleryOpen(false);
+    setLoading(true);
+    try {
+      const blob = await galleryPhotoToBlob(photo);
+      const filename = `${Date.now()}.jpg`;
+      const media = await wpUploadMedia(blob, filename);
+      setImageId(media.id);
+      present({ message: 'Image uploaded', duration: 1200, color: 'success' });
+    } catch (e) {
+      present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -111,7 +155,7 @@ const Tab3: React.FC = () => {
           title,
           acf: {
             journal_date: journalDate,
-            mood,
+            mood: sanitizeMood(mood),
             journal_image: imageId,
             journal_entry: journalEntry,
             journal_prompt: journalPrompt,
@@ -148,15 +192,58 @@ const Tab3: React.FC = () => {
 
         <IonItem>
           <IonLabel position="stacked">Title</IonLabel>
-          <IonInput value={title} onIonInput={(e) => setTitle(e.detail.value ?? '')} />
+          <IonInput value={title} placeholder="e.g. A walk in the park" onIonInput={(e) => setTitle(e.detail.value ?? '')} />
         </IonItem>
 
         <IonItem lines="none">
           <IonLabel>Image</IonLabel>
-          <IonButton onClick={pickAndUploadImage} slot="end">
-            {imageId ? 'Replace' : 'Add'}
+          <IonButton onClick={() => setImageActionOpen(true)} slot="end">
+            Add Image
           </IonButton>
         </IonItem>
+
+        <IonActionSheet
+          isOpen={imageActionOpen}
+          onDidDismiss={() => setImageActionOpen(false)}
+          buttons={[
+            {
+              text: 'Take Photo',
+              handler: () => pickAndUploadImage(CameraSource.Camera),
+            },
+            {
+              text: 'Upload from Photos',
+              handler: () => pickAndUploadImage(CameraSource.Photos),
+            },
+            {
+              text: 'Choose from Gallery',
+              handler: () => setGalleryOpen(true),
+            },
+            {
+              text: 'Cancel',
+              role: 'cancel',
+            },
+          ]}
+        />
+
+        <IonModal isOpen={galleryOpen} onDidDismiss={() => setGalleryOpen(false)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>Select from Gallery</IonTitle>
+              <IonButton slot="end" onClick={() => setGalleryOpen(false)}>
+                Close
+              </IonButton>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent>
+            <IonRow>
+              {photos.map((p) => (
+                <IonCol size="6" key={p.filepath}>
+                  <IonImg src={p.webviewPath} onClick={() => pickFromGalleryAndUpload(p)} />
+                </IonCol>
+              ))}
+            </IonRow>
+          </IonContent>
+        </IonModal>
 
         {noteType === 'quick-note' ? (
           <>
@@ -164,41 +251,64 @@ const Tab3: React.FC = () => {
               <IonLabel position="stacked">Image Description</IonLabel>
               <IonInput
                 value={imageDescription}
+                placeholder="e.g. Sunset over the lake"
                 onIonInput={(e) => setImageDescription(e.detail.value ?? '')}
               />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Where Taken</IonLabel>
-              <IonInput value={imageLocation} onIonInput={(e) => setImageLocation(e.detail.value ?? '')} />
+              <IonInput
+                value={imageLocation}
+                placeholder="e.g. Oklahoma City"
+                onIonInput={(e) => setImageLocation(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Notes</IonLabel>
-              <IonTextarea value={notesBody} onIonInput={(e) => setNotesBody(e.detail.value ?? '')} />
+              <IonTextarea
+                value={notesBody}
+                placeholder="Write your note here..."
+                onIonInput={(e) => setNotesBody(e.detail.value ?? '')}
+              />
             </IonItem>
           </>
         ) : (
           <>
             <IonItem>
               <IonLabel position="stacked">Journal Date (YYYYMMDD)</IonLabel>
-              <IonInput value={journalDate} onIonInput={(e) => setJournalDate(e.detail.value ?? '')} />
+              <IonInput
+                value={journalDate}
+                placeholder="YYYYMMDD"
+                onIonInput={(e) => setJournalDate(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Mood</IonLabel>
-              <IonSelect value={mood} onIonChange={(e) => setMood(e.detail.value)}>
-                <IonSelectOption value="Great">Great</IonSelectOption>
-                <IonSelectOption value="Good">Good</IonSelectOption>
+              <IonSelect value={mood} onIonChange={(e) => setMood(sanitizeMood(e.detail.value))}>
+                <IonSelectOption value="Happy">Happy</IonSelectOption>
+                <IonSelectOption value="Calm">Calm</IonSelectOption>
                 <IonSelectOption value="Neutral">Neutral</IonSelectOption>
-                <IonSelectOption value="Bad">Bad</IonSelectOption>
-                <IonSelectOption value="Awful">Awful</IonSelectOption>
+                <IonSelectOption value="Tired">Tired</IonSelectOption>
+                <IonSelectOption value="Stressed">Stressed</IonSelectOption>
+                <IonSelectOption value="Anxious">Anxious</IonSelectOption>
+                <IonSelectOption value="Excited">Excited</IonSelectOption>
               </IonSelect>
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Journal Entry</IonLabel>
-              <IonTextarea value={journalEntry} onIonInput={(e) => setJournalEntry(e.detail.value ?? '')} />
+              <IonTextarea
+                value={journalEntry}
+                placeholder="What happened today? How did it make you feel?"
+                onIonInput={(e) => setJournalEntry(e.detail.value ?? '')}
+              />
             </IonItem>
             <IonItem>
               <IonLabel position="stacked">Prompt Used</IonLabel>
-              <IonTextarea value={journalPrompt} onIonInput={(e) => setJournalPrompt(e.detail.value ?? '')} />
+              <IonTextarea
+                value={journalPrompt}
+                placeholder="Optional: paste the prompt you used"
+                onIonInput={(e) => setJournalPrompt(e.detail.value ?? '')}
+              />
             </IonItem>
           </>
         )}

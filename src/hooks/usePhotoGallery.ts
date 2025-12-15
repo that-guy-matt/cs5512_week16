@@ -11,26 +11,25 @@ export function usePhotoGallery() {
     const PHOTO_STORAGE = 'photos';
 
     useEffect(() => {
-        const loadSaved = async () => {
-            const { value: photoList } = await Preferences.get({ key: PHOTO_STORAGE});
-            const photosInPreferences = (photoList ? JSON.parse(photoList) : []) as UserPhoto[];
-            
-            if (!isPlatform('hybrid')) {
-                
-                for (const photo of photosInPreferences) {
-                    const readFile = await Filesystem.readFile({
-                        path: photo.filepath,
-                        directory: Directory.Data,
-                    });
-                photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
-                }
-            }
-
-            setPhotos(photosInPreferences);
-        };
-
-        loadSaved();
+        reloadPhotos();
     }, []);
+
+    const reloadPhotos = async () => {
+        const { value: photoList } = await Preferences.get({ key: PHOTO_STORAGE});
+        const photosInPreferences = (photoList ? JSON.parse(photoList) : []) as UserPhoto[];
+        
+        if (!isPlatform('hybrid')) {
+            for (const photo of photosInPreferences) {
+                const readFile = await Filesystem.readFile({
+                    path: photo.filepath,
+                    directory: Directory.Data,
+                });
+                photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+            }
+        }
+
+        setPhotos(photosInPreferences);
+    };
 
     const addNewToGallery = async () => {
         // take photo
@@ -39,17 +38,20 @@ export function usePhotoGallery() {
             source: CameraSource.Camera,
             quality: 100,
         });
-        
+
+        await savePhotoToGallery(capturedPhoto);
+    };
+
+    const savePhotoToGallery = async (photo: Photo) => {
         const fileName = Date.now() + '.jpg';
-
-        const savedImageFile = await savePicture(capturedPhoto, fileName);
-
-        const newPhotos = [savedImageFile, ...photos];
-
-
-        setPhotos(newPhotos);
-
+        const savedImageFile = await savePicture(photo, fileName);
+        let newPhotos: UserPhoto[] = [];
+        setPhotos((current) => {
+            newPhotos = [savedImageFile, ...current];
+            return newPhotos;
+        });
         Preferences.set({ key: PHOTO_STORAGE, value: JSON.stringify(newPhotos) });
+        return savedImageFile;
     };
 
     const savePicture = async (photo: Photo, fileName: string): Promise<UserPhoto> => {
@@ -101,6 +103,8 @@ export function usePhotoGallery() {
 
     return {
         addNewToGallery,
+        savePhotoToGallery,
+        reloadPhotos,
         photos,
     };
 }
