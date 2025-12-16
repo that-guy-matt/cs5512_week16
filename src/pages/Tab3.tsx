@@ -22,9 +22,9 @@ import {
 import { Camera, CameraResultType, CameraSource, type Photo } from '@capacitor/camera';
 import { Filesystem } from '@capacitor/filesystem';
 import { isPlatform } from '@ionic/react';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
-import { wpPostJson, wpUploadMedia } from '../api/wordpress';
+import { type WpMedia, wpGet, wpPostJson, wpUploadMedia } from '../api/wordpress';
 import { usePhotoGallery, type UserPhoto } from '../hooks/usePhotoGallery';
 import './Tab3.css';
 
@@ -35,6 +35,16 @@ function sanitizeMood(value: unknown): AllowedMood {
   if (typeof value !== 'string') return 'Neutral';
   return (allowedMoods as readonly string[]).includes(value) ? (value as AllowedMood) : 'Neutral';
 }
+
+const placeholderImageDataUri =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+      <rect width="240" height="240" fill="#f3f4f6"/>
+      <path d="M60 160l35-45 30 35 20-25 35 35H60z" fill="#cbd5e1"/>
+      <circle cx="90" cy="90" r="14" fill="#cbd5e1"/>
+    </svg>`
+  );
 
 function formatDateForAcf(date: Date): string {
   const y = String(date.getFullYear());
@@ -77,6 +87,7 @@ const Tab3: React.FC = () => {
 
   const [title, setTitle] = useState('');
   const [imageId, setImageId] = useState<number | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   // quick-note
   const [imageDescription, setImageDescription] = useState('');
@@ -92,6 +103,23 @@ const Tab3: React.FC = () => {
   const pageTitle = useMemo(() => {
     return noteType === 'daily-journal' ? 'New Daily Journal' : 'New Quick Note';
   }, [noteType]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!imageId) {
+        setImageUrl(null);
+        return;
+      }
+      try {
+        const media = await wpGet<WpMedia>(`/wp/v2/media/${imageId}`);
+        const thumb = media.media_details?.sizes?.thumbnail?.source_url;
+        setImageUrl(thumb || media.source_url);
+      } catch {
+        setImageUrl(null);
+      }
+    };
+    load();
+  }, [imageId]);
 
   const pickAndUploadImage = async (source: CameraSource) => {
     try {
@@ -200,6 +228,26 @@ const Tab3: React.FC = () => {
           <IonButton onClick={() => setImageActionOpen(true)} slot="end">
             Add Image
           </IonButton>
+        </IonItem>
+
+        <IonItem lines="none">
+          <div style={{ position: 'relative', width: 120, height: 120 }}>
+            <IonImg
+              src={imageUrl ?? placeholderImageDataUri}
+              style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, overflow: 'hidden' }}
+            />
+            {imageId && (
+              <IonButton
+                size="small"
+                fill="solid"
+                color="medium"
+                onClick={() => setImageId(null)}
+                style={{ position: 'absolute', top: 6, right: 6, minWidth: 28, height: 28 }}
+              >
+                X
+              </IonButton>
+            )}
+          </div>
         </IonItem>
 
         <IonActionSheet
