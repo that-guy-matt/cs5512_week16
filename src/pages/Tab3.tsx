@@ -1,5 +1,6 @@
 import {
   IonActionSheet,
+  IonAlert,
   IonButton,
   IonCol,
   IonContent,
@@ -84,6 +85,7 @@ const Tab3: React.FC = () => {
 
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [imageActionOpen, setImageActionOpen] = useState(false);
+  const [removeImageOpen, setRemoveImageOpen] = useState(false);
 
   const [title, setTitle] = useState('');
   const [imageId, setImageId] = useState<number | null>(null);
@@ -103,6 +105,17 @@ const Tab3: React.FC = () => {
   const pageTitle = useMemo(() => {
     return noteType === 'daily-journal' ? 'New Daily Journal' : 'New Quick Note';
   }, [noteType]);
+
+  const setImageOverride = (key: string, nextImageId: number | null, nextImageUrl: string | null) => {
+    try {
+      const raw = sessionStorage.getItem('noteImageOverrides');
+      const current = raw ? (JSON.parse(raw) as Record<string, { imageId: number | null; imageUrl?: string | null }>) : {};
+      const updated = { ...current, [key]: { imageId: nextImageId, imageUrl: nextImageUrl } };
+      sessionStorage.setItem('noteImageOverrides', JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -135,6 +148,7 @@ const Tab3: React.FC = () => {
       const filename = `${Date.now()}.jpg`;
       const media = await wpUploadMedia(blob, filename);
       setImageId(media.id);
+      setImageUrl(media.media_details?.sizes?.thumbnail?.source_url ?? media.source_url);
       present({ message: 'Image uploaded', duration: 1200, color: 'success' });
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
@@ -155,6 +169,7 @@ const Tab3: React.FC = () => {
       const filename = `${Date.now()}.jpg`;
       const media = await wpUploadMedia(blob, filename);
       setImageId(media.id);
+      setImageUrl(media.media_details?.sizes?.thumbnail?.source_url ?? media.source_url);
       present({ message: 'Image uploaded', duration: 1200, color: 'success' });
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
@@ -167,28 +182,30 @@ const Tab3: React.FC = () => {
     setLoading(true);
     try {
       if (noteType === 'quick-note') {
-        await wpPostJson('/wp/v2/quick-note', {
+        const created = await wpPostJson<{ id: number }>('/wp/v2/quick-note', {
           status: 'publish',
           title,
           acf: {
-            note_image: imageId,
+            note_image: imageId ?? null,
             image_description: imageDescription,
             image_location: imageLocation,
             notes_body: notesBody,
           },
         });
+        setImageOverride(`quick-note-${created.id}`, imageId, imageUrl);
       } else {
-        await wpPostJson('/wp/v2/daily-journal', {
+        const created = await wpPostJson<{ id: number }>('/wp/v2/daily-journal', {
           status: 'publish',
           title,
           acf: {
             journal_date: journalDate,
             mood: sanitizeMood(mood),
-            journal_image: imageId,
+            journal_image: imageId ?? null,
             journal_entry: journalEntry,
             journal_prompt: journalPrompt,
           },
         });
+        setImageOverride(`daily-journal-${created.id}`, imageId, imageUrl);
       }
 
       present({ message: 'Created', duration: 1200, color: 'success' });
@@ -225,13 +242,13 @@ const Tab3: React.FC = () => {
 
         <IonItem lines="none">
           <IonLabel>Image</IonLabel>
-          <IonButton onClick={() => setImageActionOpen(true)} slot="end">
-            Add Image
-          </IonButton>
         </IonItem>
 
         <IonItem lines="none">
-          <div style={{ position: 'relative', width: 120, height: 120 }}>
+          <div
+            onClick={() => setImageActionOpen(true)}
+            style={{ position: 'relative', width: 120, height: 120, cursor: 'pointer' }}
+          >
             <IonImg
               src={imageUrl ?? placeholderImageDataUri}
               style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8, overflow: 'hidden' }}
@@ -241,14 +258,58 @@ const Tab3: React.FC = () => {
                 size="small"
                 fill="solid"
                 color="medium"
-                onClick={() => setImageId(null)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRemoveImageOpen(true);
+                }}
                 style={{ position: 'absolute', top: 6, right: 6, minWidth: 28, height: 28 }}
               >
                 X
               </IonButton>
             )}
+            {!imageId && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(0,0,0,0.25)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  textAlign: 'center',
+                  padding: 8,
+                }}
+              >
+                Tap to add image
+              </div>
+            )}
           </div>
         </IonItem>
+
+        <IonAlert
+          isOpen={removeImageOpen}
+          header="Remove image?"
+          message="This will remove the image from this note."
+          onDidDismiss={() => setRemoveImageOpen(false)}
+          buttons={[
+            {
+              text: 'Cancel',
+              role: 'cancel',
+            },
+            {
+              text: 'Remove',
+              role: 'destructive',
+              handler: () => {
+                setImageId(null);
+                setImageUrl(null);
+              },
+            },
+          ]}
+        />
 
         <IonActionSheet
           isOpen={imageActionOpen}

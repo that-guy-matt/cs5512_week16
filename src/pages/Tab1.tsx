@@ -12,9 +12,10 @@ import {
   IonTitle,
   IonToolbar,
   useIonToast,
+  useIonViewWillEnter,
 } from '@ionic/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import {
   decodeHtml,
   type NoteListItem,
@@ -33,13 +34,26 @@ function formatDisplayDate(iso: string): string {
 
 const Tab1: React.FC = () => {
   const history = useHistory();
+  const location = useLocation();
   const [present] = useIonToast();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<NoteListItem[]>([]);
 
+  const getImageOverrides = () => {
+    try {
+      const raw = sessionStorage.getItem('noteImageOverrides');
+      if (!raw) return {} as Record<string, { imageId: number | null; imageUrl?: string | null }>;
+      return JSON.parse(raw) as Record<string, { imageId: number | null; imageUrl?: string | null }>;
+    } catch {
+      return {} as Record<string, { imageId: number | null; imageUrl?: string | null }>;
+    }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const overrides = getImageOverrides();
+
       const [quickNotes, dailyJournals] = await Promise.all([
         wpGet<WpQuickNote[]>('/wp/v2/quick-note'),
         wpGet<WpDailyJournal[]>('/wp/v2/daily-journal'),
@@ -51,14 +65,20 @@ const Tab1: React.FC = () => {
           type: n.type,
           title: decodeHtml(n.title.rendered ?? ''),
           date: n.date,
-          imageId: n.acf.note_image ?? undefined,
+          imageId:
+            overrides[`${n.type}-${n.id}`]?.imageId === null
+              ? undefined
+              : (overrides[`${n.type}-${n.id}`]?.imageId ?? (n.acf.note_image ?? undefined)),
         })),
         ...dailyJournals.map((n) => ({
           id: n.id,
           type: n.type,
           title: decodeHtml(n.title.rendered ?? ''),
           date: n.date,
-          imageId: n.acf.journal_image ?? undefined,
+          imageId:
+            overrides[`${n.type}-${n.id}`]?.imageId === null
+              ? undefined
+              : (overrides[`${n.type}-${n.id}`]?.imageId ?? (n.acf.journal_image ?? undefined)),
         })),
       ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -83,10 +103,16 @@ const Tab1: React.FC = () => {
       );
 
       setItems(
-        merged.map((m) => ({
-          ...m,
-          thumbnailUrl: m.imageId ? mediaById.get(m.imageId) : undefined,
-        }))
+        merged.map((m) => {
+          const override = overrides[`${m.type}-${m.id}`];
+          return {
+            ...m,
+            thumbnailUrl:
+              override?.imageId === null
+                ? undefined
+                : (override?.imageUrl ?? (m.imageId ? mediaById.get(m.imageId) : undefined)),
+          };
+        })
       );
     } catch (e) {
       present({ message: e instanceof Error ? e.message : String(e), duration: 3000, color: 'danger' });
@@ -98,6 +124,18 @@ const Tab1: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  useIonViewWillEnter(() => {
+    load();
+  });
+
+  useEffect(() => {
+    if (location.pathname === '/tab1') {
+      load();
+    }
+  }, [load, location.pathname]);
+
+  // Any UI-level overrides are handled via sessionStorage and picked up on load()
 
   const groupedLabel = useMemo(() => {
     return items.length === 1 ? 'note' : 'notes';

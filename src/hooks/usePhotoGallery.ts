@@ -54,6 +54,24 @@ export function usePhotoGallery() {
         return savedImageFile;
     };
 
+    const deletePhotoFromGallery = async (photo: UserPhoto) => {
+        setPhotos((current) => {
+            const next = current.filter((p) => p.filepath !== photo.filepath);
+            Preferences.set({ key: PHOTO_STORAGE, value: JSON.stringify(next) });
+            return next;
+        });
+
+        try {
+            if (isPlatform('hybrid')) {
+                await Filesystem.deleteFile({ path: photo.filepath });
+            } else {
+                await Filesystem.deleteFile({ path: photo.filepath, directory: Directory.Data });
+            }
+        } catch {
+            // Ignore delete errors (file may already be gone)
+        }
+    };
+
     const savePicture = async (photo: Photo, fileName: string): Promise<UserPhoto> => {
         let base64Data: string | Blob;
 
@@ -104,6 +122,7 @@ export function usePhotoGallery() {
     return {
         addNewToGallery,
         savePhotoToGallery,
+        deletePhotoFromGallery,
         reloadPhotos,
         photos,
     };

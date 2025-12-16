@@ -1,9 +1,11 @@
 import { camera } from 'ionicons/icons';
 import { IonContent, 
+         IonAlert,
          IonFab, 
          IonFabButton, 
          IonHeader, 
          IonIcon, 
+         IonButton,
          IonPage, 
          IonTitle, 
          IonToolbar,
@@ -13,15 +15,20 @@ import { IonContent,
          IonImg, 
          useIonViewWillEnter,
         } from '@ionic/react';
+import { useState } from 'react';
 import { usePhotoGallery } from '../hooks/usePhotoGallery';
 import './Tab2.css';
 
 const Tab2: React.FC = () => {
-  const { photos, addNewToGallery, reloadPhotos } = usePhotoGallery();
+  const { photos, addNewToGallery, reloadPhotos, deletePhotoFromGallery } = usePhotoGallery();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
 
   useIonViewWillEnter(() => {
     reloadPhotos();
   });
+
+  const pendingPhoto = pendingDeletePath ? photos.find((p) => p.filepath === pendingDeletePath) : undefined;
   return (
     <IonPage>
       <IonHeader>
@@ -39,11 +46,52 @@ const Tab2: React.FC = () => {
           <IonRow>
             {photos.map((photo) => (
               <IonCol size='6' key={photo.filepath}>
-                <IonImg src={photo.webviewPath} />
+                <div style={{ position: 'relative' }}>
+                  <IonImg src={photo.webviewPath} />
+                  <IonButton
+                    size="small"
+                    fill="solid"
+                    color="medium"
+                    onClick={() => {
+                      setPendingDeletePath(photo.filepath);
+                      setDeleteOpen(true);
+                    }}
+                    style={{ position: 'absolute', top: 8, right: 8, minWidth: 28, height: 28 }}
+                  >
+                    X
+                  </IonButton>
+                </div>
               </IonCol>
             ))}
           </IonRow>
         </IonGrid>
+
+        <IonAlert
+          isOpen={deleteOpen}
+          header="Remove photo?"
+          message="This will permanently delete the photo from the gallery and device storage."
+          onDidDismiss={() => {
+            setDeleteOpen(false);
+            setPendingDeletePath(null);
+          }}
+          buttons={[
+            {
+              text: 'Cancel',
+              role: 'cancel',
+            },
+            {
+              text: 'Delete',
+              role: 'destructive',
+              handler: async () => {
+                if (pendingPhoto) {
+                  await deletePhotoFromGallery(pendingPhoto);
+                }
+                setDeleteOpen(false);
+                setPendingDeletePath(null);
+              },
+            },
+          ]}
+        />
         <IonFab vertical='bottom' horizontal='center' slot='fixed'>
           <IonFabButton onClick={() => addNewToGallery()}>
             <IonIcon icon={camera}></IonIcon>
