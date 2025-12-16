@@ -19,12 +19,19 @@ import { useState } from 'react';
 import { usePhotoGallery } from '../hooks/usePhotoGallery';
 import './Tab2.css';
 
+// Photo Gallery tab.
+//
+// Displays locally-stored photos from the shared gallery store (usePhotoGallery).
+// Provides deletion (with confirmation) and ensures the list reloads when the tab
+// becomes active so images added from other tabs appear immediately.
+
 const Tab2: React.FC = () => {
   const { photos, addNewToGallery, reloadPhotos, deletePhotoFromGallery } = usePhotoGallery();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
 
   useIonViewWillEnter(() => {
+    // Ensure we show the latest persisted gallery contents.
     reloadPhotos();
   });
 
@@ -48,6 +55,7 @@ const Tab2: React.FC = () => {
               <IonCol size='6' key={photo.filepath}>
                 <div style={{ position: 'relative' }}>
                   <IonImg src={photo.webviewPath} />
+                  {/* X button removes an image from the gallery after confirmation. */}
                   <IonButton
                     size="small"
                     fill="solid"
@@ -83,6 +91,7 @@ const Tab2: React.FC = () => {
               text: 'Delete',
               role: 'destructive',
               handler: async () => {
+                // Delete from Preferences/state and remove the underlying file.
                 if (pendingPhoto) {
                   await deletePhotoFromGallery(pendingPhoto);
                 }

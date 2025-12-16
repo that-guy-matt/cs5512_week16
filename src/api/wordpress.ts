@@ -1,3 +1,11 @@
+// WordPress REST API client + shared types.
+//
+// This file centralizes:
+// - TypeScript types for our WP custom post types (quick-note, daily-journal) and media.
+// - Small fetch helpers (GET/POST JSON + media upload) with Basic Auth.
+//
+// Keeping this logic in one place avoids duplicating auth/header handling across pages.
+
 export type WpPostType = 'quick-note' | 'daily-journal';
 
 export interface WpRenderedText {
@@ -59,10 +67,13 @@ function getEnv(name: string): string {
 }
 
 export function getWpApiUrl(): string {
+  // API base URL is stored in Vite env; normalize by trimming trailing slashes.
   return getEnv('VITE_WP_API_URL').replace(/\/+$/, '');
 }
 
 function getAuthHeader(): string {
+  // Basic auth for protected endpoints (POST + media upload).
+  // Credentials are pulled from .env and encoded per RFC7617.
   const username = getEnv('VITE_WP_USERNAME');
   const password = getEnv('VITE_WP_PASSWORD');
   const token = btoa(`${username}:${password}`);
@@ -70,6 +81,7 @@ function getAuthHeader(): string {
 }
 
 async function wpFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // Lower-level helper: builds URL, applies headers, and throws on non-2xx.
   const baseUrl = getWpApiUrl();
   const url = `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
 
@@ -90,10 +102,12 @@ async function wpFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function wpGet<T>(path: string): Promise<T> {
+  // Public GET requests (no auth required for our use cases).
   return wpFetch<T>(path, { method: 'GET' });
 }
 
 export async function wpPostJson<T>(path: string, body: unknown): Promise<T> {
+  // JSON POST requests to WP REST (requires auth).
   return wpFetch<T>(path, {
     method: 'POST',
     headers: {
@@ -105,6 +119,7 @@ export async function wpPostJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function wpUploadMedia(blob: Blob, filename: string): Promise<WpMedia> {
+  // Media upload endpoint expects multipart/form-data.
   const form = new FormData();
   form.append('file', blob, filename);
 

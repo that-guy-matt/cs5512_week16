@@ -39,6 +39,18 @@ import {
 } from '../api/wordpress';
 import { usePhotoGallery, type UserPhoto } from '../hooks/usePhotoGallery';
 
+// Note edit page.
+//
+// This page edits either a Quick Note or Daily Journal. It loads the post from WP,
+// allows updating ACF fields, and supports adding/removing an image.
+//
+// Image UX:
+// - Tapping the thumbnail opens an action sheet for capture/upload/gallery pick.
+// - X overlay removes the current image (with confirmation).
+//
+// To avoid stale UI immediately after an edit, we persist a per-session image override
+// keyed by `${type}-${id}` and apply it when loading.
+
 type RouteParams = {
   type: WpPostType;
   id: string;

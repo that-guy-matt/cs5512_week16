@@ -26,6 +26,13 @@ import {
 } from '../api/wordpress';
 import './Tab1.css';
 
+// Notes browsing tab.
+//
+// This page merges quick notes + daily journals into a single list.
+// Thumbnail URLs are resolved from WP media IDs. We also support a
+// short-lived client-side override (sessionStorage) so the UI can reflect
+// image add/remove immediately even if WP responses are briefly stale.
+
 function formatDisplayDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -40,6 +47,8 @@ const Tab1: React.FC = () => {
   const [items, setItems] = useState<NoteListItem[]>([]);
 
   const getImageOverrides = () => {
+    // Per-session image overrides keyed by `${type}-${id}`.
+    // Used to avoid stale thumbnails immediately after an edit.
     try {
       const raw = sessionStorage.getItem('noteImageOverrides');
       if (!raw) return {} as Record<string, { imageId: number | null; imageUrl?: string | null }>;
@@ -91,6 +100,7 @@ const Tab1: React.FC = () => {
         imageIds.map(async (mid) => {
           try {
             const media = await wpGet<WpMedia>(`/wp/v2/media/${mid}`);
+            // Prefer smaller sizes for the list UI.
             const thumb =
               media.media_details?.sizes?.thumbnail?.source_url ??
               media.media_details?.sizes?.medium?.source_url ??
@@ -122,14 +132,18 @@ const Tab1: React.FC = () => {
   }, [present]);
 
   useEffect(() => {
+    // Initial load on first mount.
     load();
   }, [load]);
 
   useIonViewWillEnter(() => {
+    // Reload whenever the tab becomes active.
     load();
   });
 
   useEffect(() => {
+    // Extra safety: some Ionic navigation flows don't remount Tab1.
+    // When we return to /tab1, ensure the list refreshes.
     if (location.pathname === '/tab1') {
       load();
     }

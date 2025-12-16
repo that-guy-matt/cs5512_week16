@@ -29,6 +29,18 @@ import { type WpMedia, wpGet, wpPostJson, wpUploadMedia } from '../api/wordpress
 import { usePhotoGallery, type UserPhoto } from '../hooks/usePhotoGallery';
 import './Tab3.css';
 
+// New note creation tab.
+//
+// Supports creating either:
+// - Quick Note (photo + description/location + notes)
+// - Daily Journal (date + mood + optional photo + entry + prompt)
+//
+// Image handling:
+// - Uploads chosen/captured images to WordPress media.
+// - Also saves chosen/captured images to the local gallery store (Tab2) for reuse.
+// - Uses a tappable thumbnail with an action sheet for image actions.
+// - Persists a per-session image override so Tab1 can reflect image changes immediately.
+
 const allowedMoods = ['Happy', 'Calm', 'Neutral', 'Tired', 'Stressed', 'Anxious', 'Excited'] as const;
 type AllowedMood = (typeof allowedMoods)[number];
 
@@ -107,6 +119,7 @@ const Tab3: React.FC = () => {
   }, [noteType]);
 
   const setImageOverride = (key: string, nextImageId: number | null, nextImageUrl: string | null) => {
+    // Session-only override to avoid stale thumbnails immediately after creating a note.
     try {
       const raw = sessionStorage.getItem('noteImageOverrides');
       const current = raw ? (JSON.parse(raw) as Record<string, { imageId: number | null; imageUrl?: string | null }>) : {};
@@ -118,6 +131,7 @@ const Tab3: React.FC = () => {
   };
 
   useEffect(() => {
+    // Resolve a WP media ID to a usable image URL for the thumbnail preview.
     const load = async () => {
       if (!imageId) {
         setImageUrl(null);

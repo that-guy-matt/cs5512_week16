@@ -1,3 +1,9 @@
+// App shell + routing.
+//
+// This file sets up Ionic React, configures tab-based navigation, and wires the
+// main pages (Tab1/Tab2/Tab3 + detail routes) together.
+
+import React from 'react';
 import { Redirect, Route } from 'react-router-dom';
 import {
   IonApp,
